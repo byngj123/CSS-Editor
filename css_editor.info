@@ -5,3 +5,5 @@ package = Features
 version = 7.x-1.0
 project = css_editor
 features[features_api][] = api:2
+
+
