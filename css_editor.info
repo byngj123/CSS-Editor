@@ -1,0 +1,7 @@
+name = CSS Editor
+description = CSS editor so you can edit your Drupal CSS through a UI
+core = 7.x
+package = Features
+version = 7.x-1.0
+project = css_editor
+features[features_api][] = api:2

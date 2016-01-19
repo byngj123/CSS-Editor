@@ -1,0 +1,849 @@
+<?php
+/**
+ * @file
+ * EMN-IES Ad Hoc Query Exporter.
+ */
+
+module_load_include('inc', 'emnies_ad_hoc_query_exporter', 'includes/emnies_ad_hoc_query_exporter.classes');
+module_load_include('inc', 'emnies_ad_hoc_query_exporter', 'includes/emnies_ad_hoc_query_exporter.config');
+
+/**
+ * Define constants.
+ */
+define("EMNIES_AD_HOC_QUERY_EXPORTER_TEMPLATE_PATH", drupal_get_path("module", "emnies_ad_hoc_query_exporter"));
+define("EMNIES_AD_HOC_QUERY_EXPORTER_TEMPORARY_FOLDER_PATH", "public://");
+define("EMNIES_AD_HOC_QUERY_EXPORTER_PHPDOCX_LOCATION", "emnies_ad_hoc_query_exporter_phpdocx_location");
+define("EMNIES_AD_HOC_QUERY_EXPORTER_EMNIES_AD_HOC_TEMPLATE", "emnies_ad_hoc_template");
+define("EMNIES_AD_HOC_QUERY_EXPORTER_EMNIES_REG_PRACTITIONER_TEMPLATE", "emnies_reg_practitioner_template");
+
+/**
+ * Register global variables.
+ */
+global $_ispublic_emnies_ad_hoc_query_exporter_;
+global $_template_emnies_ad_hoc_query_exporter_;
+
+/**
+ * Define global variables.
+ */
+$_template_emnies_ad_hoc_query_exporter_ = new stdClass();
+$_template_emnies_ad_hoc_query_exporter_->type = "UNSPECIFIED";
+
+/**
+ * Adds a new tab buttons to the webform results page.
+ */
+function emnies_ad_hoc_query_exporter_menu() {
+  $items["node/%webform_menu/webform-results/download-wider"] = array(
+    'title' => 'Download to Word (for wider dissem.)',
+    'page callback' => '_emnies_ad_hoc_query_exporter_wider_page_callback',
+    'page arguments' => array(1),
+    'access arguments' => array('can download wider'),
+    'weight' => 10,
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+  );
+  $items["node/%webform_menu/webform-results/download-closed"] = array(
+    'title' => 'Download to Word (closed dissem.)',
+    'page callback' => '_emnies_ad_hoc_query_exporter_closed_page_callback',
+    'page arguments' => array(1),
+    'access arguments' => array('can download closed'),
+    'weight' => 11,
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+  );
+  $items["node/%webform_menu/webform-results/export-excel"] = array(
+    'title' => 'Export to Excel',
+    'page callback' => '_emnies_ad_hoc_query_exporter_excel_export',
+    'page arguments' => array(1),
+    'access arguments' => array('can download excel'),
+    'weight' => 6,
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+  );
+  $items["node/%webform_menu/webform/launch"] = array(
+    'title' => 'Launch and Distribute',
+    'page callback' => '_emnies_ad_hoc_query_exporter_launch_redirect',
+    'page arguments' => array(1),
+    'access callback' => '_emnies_ad_hoc_query_exporter_launch_access_callback',
+    'access arguments' => array(1),
+    'weight' => 11,
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+  );
+
+  $items['admin/config/emn-ad-hoc-query-config'] = array(
+    'title' => 'EMN Exporter Config',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_emnies_ad_hoc_query_exporter_ahq_template_update_form'),
+    'access arguments' => array('access emn exporter configuration page'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['emnies-ad-hoc-query-exporter/phpdocx-override'] = array(
+    'title' => 'PhpDocx Location Override',
+    'page callback' => '_emnies_ad_hoc_query_exporter_phpdocx_override',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_menu_alter().
+ */
+function webform_menu_alter(&$items) {
+  // Set these tabs to MENU_CALLBACK, so they still register the path,
+  // but just don't show the tab:
+  $items['node/%webform_menu/webform-results/download']['type'] = MENU_CALLBACK;
+  $items['node/%webform_menu/webform-results/clear']['type'] = MENU_CALLBACK;
+  $items['node/%webform_menu/webform/conditionals']['type'] = MENU_CALLBACK;
+  $items['node/%webform_menu/webform/emails']['type'] = MENU_CALLBACK;
+  $items['node/%webform_menu/webform/configure']['type'] = MENU_CALLBACK;
+  $items['node/%webform_menu/webform-results/table']['type'] = MENU_CALLBACK;
+
+  // These change the title of the webform edit pages.
+  $items['node/%webform_menu/webform']['title callback'] = '_emnies_ad_hoc_query_exporter_override_webform_title';
+  $items['node/%webform_menu/webform']['title arguments'] = array(1);
+}
+
+/**
+ * Implements hook_override_webform_title().
+ */
+function _emnies_ad_hoc_query_exporter_override_webform_title($node) {
+  return t('Questions');
+}
+
+
+/**
+ * Implements hook_get_ahq_id().
+ *
+ * Checks if the NID number is valid.
+ */
+function _emnies_ad_hoc_query_exporter_get_ahq_id($ahq_id, $watchdog_error, $echo_error = NULL) {
+  try {
+    $boolean = _emnies_ad_hoc_query_exporter_is_valid_int($ahq_id);
+    if ($boolean == FALSE) {
+      throw new Exception();
+    }
+    else {
+      return $ahq_id;
+    }
+  }
+  catch (Exception $e) {
+    if (!empty($echo_error)) {
+      echo $echo_error;
+    }
+    watchdog('emnies_ad_hoc_query_exporter', $watchdog_error, array(), WATCHDOG_ERROR, $link = NULL);
+  }
+
+}
+
+/**
+ * Implements launch_access_callback().
+ */
+function _emnies_ad_hoc_query_exporter_launch_access_callback($node) {
+  $adhocqueryid = _emnies_ad_hoc_query_exporter_get_ahq_id(arg(1), 'The Exporter ID for launch callback is invalid.');
+  $questions_data = _emnies_ad_hoc_query_exporter_get_questions_data($adhocqueryid);
+  $obj_ad_hoc_query_questions = _emnies_ad_hoc_query_exporter_get_question_objects($questions_data);
+  if (count($obj_ad_hoc_query_questions) >= 1 && $node->uid == $GLOBALS['user']->uid) {
+    return TRUE;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Implements launch_redirect().
+ *
+ * Redirects the Launch and distribute button to create a new adhocquerylaunch.
+ */
+function _emnies_ad_hoc_query_exporter_launch_redirect() {
+  $nid = arg(1);
+  drupal_goto(drupal_get_path_alias("node/add/adhocqueryrequestform/$nid"));
+  echo "wrong";
+}
+
+/**
+ * Implements excel_export().
+ *
+ * Sets the path for the Export to Excel menu tab.
+ * Uses the NID argument.
+ */
+function _emnies_ad_hoc_query_exporter_excel_export() {
+  $nid = arg(1);
+  drupal_goto(drupal_get_path_alias("ad-hoc-query-excel-export/$nid"));
+}
+
+/**
+ * Implements hook_permission().
+ */
+function emnies_ad_hoc_query_exporter_permission() {
+  $permissions = array(
+    'access emn exporter configuration page' => array(
+      'title' => t('Access EMN-IES Ad-Hoc Query Exporter Configuration page'),
+      'description' => t('Allow users to access the configuration page to select/upload new templates.'),
+    ),
+    'can download wider' => array(
+      'title' => t('Can download for wider dissemination document'),
+      'description' => t('Allow users to download the Word file where responses are for wider dissemination only.'),
+    ),
+    'can download closed' => array(
+      'title' => t('Can download for closed dissemination document'),
+      'description' => t('Allow users to download the Word file where all responses are included.'),
+    ),
+    'can download excel' => array(
+      'title' => t('Can download all responses to Excel'),
+      'description' => t('Allow users to download all responses to an Excel document.'),
+    ),
+  );
+  return $permissions;
+}
+
+/**
+ * Initiates the module on button click with an $ispublic as true.
+ */
+function _emnies_ad_hoc_query_exporter_wider_page_callback($node) {
+  watchdog('emnies_ad_hoc_query_exporter', 'A user started to download a wider dissemination file.', array(), WATCHDOG_NOTICE, $link = NULL);
+  global $_ispublic_emnies_ad_hoc_query_exporter_;
+  global $_template_emnies_ad_hoc_query_exporter_;
+  $_template_emnies_ad_hoc_query_exporter_->type = _emnies_ad_hoc_query_exporter_get_template_type(_emnies_ad_hoc_query_exporter_register_node());
+  $_ispublic_emnies_ad_hoc_query_exporter_ = TRUE;
+  $adhocqueryid = _emnies_ad_hoc_query_exporter_get_ahq_id(arg(1), t("The Exporter ID for a wider dissemination download is invalid. NID") . arg(1), t('Error Message: The Ad-Hoc Query ID is invalid. Please contact the EMN-IES Team with this error message.'));
+
+  if (_emnies_ad_hoc_query_exporter_is_phpdocx_location_set(variable_get(EMNIES_AD_HOC_QUERY_EXPORTER_PHPDOCX_LOCATION))) {
+    $meta_data = _emnies_ad_hoc_query_exporter_db_query($adhocqueryid);
+    $obj_ad_hoc_query_meta = _emnies_ad_hoc_query_exporter_get_meta_object($meta_data);
+
+    $questions_data = _emnies_ad_hoc_query_exporter_get_questions_data($obj_ad_hoc_query_meta->nid);
+    $obj_ad_hoc_query_questions = _emnies_ad_hoc_query_exporter_get_question_objects($questions_data);
+
+    $responses_data = _emnies_ad_hoc_query_exporter_get_responses_data($obj_ad_hoc_query_meta->nid);
+    $obj_ad_hoc_query_responses = _emnies_ad_hoc_query_exporter_get_response_objects($responses_data);
+
+    $obj_ad_hoc_query_meta->respondedCountries = _emnies_ad_hoc_query_exporter_get_responded_countries_as_comma_separated_string($obj_ad_hoc_query_responses);
+
+    _emnies_ad_hoc_query_exporter_create__word_document($obj_ad_hoc_query_meta, $obj_ad_hoc_query_questions, $obj_ad_hoc_query_responses);
+  }
+  else {
+    form_set_error('emnies_ad_hoc_query_exporter', t("PhpDocx location not defined <a href='@override'>click here to set the location.</a>", array('@override' => 'admin/config/emn-ad-hoc-query-config')));
+    watchdog('emnies_ad_hoc_query_exporter', 'PhpDocx location not defined.', array(), WATCHDOG_ERROR, $link = NULL);
+    drupal_goto(drupal_get_path_alias("node/$adhocqueryid/webform-results"));
+  }
+}
+
+
+/**
+ * Initiates the module on button click with an $ispublic as false.
+ */
+function _emnies_ad_hoc_query_exporter_closed_page_callback($node) {
+  watchdog('emnies_ad_hoc_query_exporter', "A user started to download a closed dissemination file.", array(), WATCHDOG_INFO, $link = NULL);
+  global $_ispublic_emnies_ad_hoc_query_exporter_;
+  global $_wider_notice_emnies_ad_hoc_query_exporter_;
+  global $_template_emnies_ad_hoc_query_exporter_;
+  $_template_emnies_ad_hoc_query_exporter_->type = _emnies_ad_hoc_query_exporter_get_template_type(_emnies_ad_hoc_query_exporter_register_node());
+  $_ispublic_emnies_ad_hoc_query_exporter_ = FALSE;
+  $_wider_notice_emnies_ad_hoc_query_exporter_ = t('Not for wider dissemination');
+
+  $adhocqueryid = _emnies_ad_hoc_query_exporter_get_ahq_id(arg(1), t("The Exporter ID for a closed download is invalid. NID:") . arg(1), t('Error Message: The Ad-Hoc Query ID is invalid. Please contact the EMN-IES Team with this error message.'));
+
+  if (_emnies_ad_hoc_query_exporter_is_phpdocx_location_set(variable_get(EMNIES_AD_HOC_QUERY_EXPORTER_PHPDOCX_LOCATION))) {
+    $meta_data = _emnies_ad_hoc_query_exporter_db_query($adhocqueryid);
+    $obj_ad_hoc_query_meta = _emnies_ad_hoc_query_exporter_get_meta_object($meta_data);
+
+    $questions_data = _emnies_ad_hoc_query_exporter_get_questions_data($obj_ad_hoc_query_meta->nid);
+    $obj_ad_hoc_query_questions = _emnies_ad_hoc_query_exporter_get_question_objects($questions_data);
+
+    $responses_data = _emnies_ad_hoc_query_exporter_get_responses_data($obj_ad_hoc_query_meta->nid);
+    $obj_ad_hoc_query_responses = _emnies_ad_hoc_query_exporter_get_response_objects($responses_data);
+
+    $obj_ad_hoc_query_meta->respondedCountries = _emnies_ad_hoc_query_exporter_get_responded_countries_as_comma_separated_string($obj_ad_hoc_query_responses);
+
+    _emnies_ad_hoc_query_exporter_create__word_document($obj_ad_hoc_query_meta, $obj_ad_hoc_query_questions, $obj_ad_hoc_query_responses);
+  }
+  else {
+    form_set_error('emnies_ad_hoc_query_exporter_template_update_form', t("PhpDocx location not defined <a href='@override'>click here to set the location.</a>", array('@override' => 'admin/config/emn-ad-hoc-query-config')));
+    watchdog('emnies_ad_hoc_query_exporter', 'PhpDocx location not defined.', array(), WATCHDOG_ERROR, $link = NULL);
+    drupal_goto(drupal_get_path_alias("node/$adhocqueryid/webform-results"));
+  }
+
+}
+
+/**
+ * Retrieves the meta data from the database..
+ *
+ * @param int $adhocqueryid
+ *   The Ad Hoc Query ID number.
+ */
+function _emnies_ad_hoc_query_exporter_db_query($adhocqueryid) {
+  $sql
+    = "SELECT ad_hoc_query_node.title                                         AS title, 
+       ad_hoc_query_node.nid                                           AS nid, 
+       (SELECT realname 
+        FROM   {realname} 
+        WHERE  realname.uid = (SELECT uid 
+                               FROM   {node} 
+                               WHERE  nid = :adhocqueryid))            AS author 
+       , 
+       (SELECT field_start_date_value 
+        FROM   {field_data_field_start_date} 
+        WHERE  field_data_field_start_date.entity_id = :adhocqueryid)  AS start_date, 
+       (SELECT field_end_date_value 
+        FROM   {field_data_field_end_date} 
+        WHERE  field_data_field_end_date.entity_id = :adhocqueryid)    AS end_date, 
+       (SELECT NAME 
+        FROM   {taxonomy_term_data} 
+        WHERE  tid = (SELECT tid 
+                      FROM   {taxonomy_index} 
+                      WHERE  nid = :adhocqueryid))                     AS category, 
+       (SELECT field_description_value 
+        FROM   {field_data_field_description} 
+        WHERE  field_data_field_description.entity_id = :adhocqueryid) AS background,
+        (SELECT field_summary_text_value
+        FROM   {field_data_field_summary_text}
+        WHERE  field_data_field_summary_text.entity_id = :adhocqueryid) AS summary,
+       tbl_author_country.author_country 
+FROM   (SELECT (SELECT NAME 
+                FROM   {taxonomy_term_data} 
+                WHERE  taxonomy_term_data.tid = field_country_tid) AS author_country, 
+               nid 
+        FROM   {node} 
+               INNER JOIN {field_data_field_country} 
+                       ON uid = field_data_field_country.entity_id 
+        WHERE  node.nid = :adhocqueryid) {tbl_author_country} 
+       INNER JOIN {node} AS {ad_hoc_query_node} 
+               ON tbl_author_country.nid = ad_hoc_query_node.nid 
+WHERE  tbl_author_country.nid = :adhocqueryid 
+ORDER  BY tbl_author_country.nid ";
+  $result = db_query($sql, array(':adhocqueryid' => $adhocqueryid));
+  return $result;
+
+}
+
+/**
+ * Retrieves the question data from the database.
+ *
+ * @param int $adhocqueryid
+ *   The Ad Hoc Query ID number.
+ */
+function _emnies_ad_hoc_query_exporter_get_questions_data($adhocqueryid) {
+  $sql
+    = "SELECT ad_hoc_query_component.NAME   AS question, 
+       ad_hoc_query_component.cid    AS component_id, 
+       ad_hoc_query_component.weight AS order_id 
+FROM   {webform_component ad_hoc_query_component} 
+WHERE  nid = :adhocqueryid 
+       AND cid <> 1 
+       AND cid <> 2
+ORDER  BY nid ";
+  $result = db_query($sql, array(':adhocqueryid' => $adhocqueryid));
+  return $result;
+
+}
+
+/**
+ * Retrieves the responce data from the database.
+ *
+ * @param int $adhocqueryid
+ *   The Ad Hoc Query ID number.
+ */
+function _emnies_ad_hoc_query_exporter_get_responses_data($adhocqueryid) {
+  $sql
+    = "SELECT tbl_user_country.country, 
+       (SELECT data 
+        FROM   {webform_submitted_data} AS {sub_webform_submitted_data} 
+        WHERE  sub_webform_submitted_data.cid = 1 
+               AND sub_webform_submitted_data.sid = webform_submitted_data.sid) 
+       AS 
+       wider_dissemination, 
+       webform_submitted_data.data 
+       AS response 
+FROM   {webform_submitted_data} 
+       INNER JOIN (SELECT webform_submissions.sid 
+                                                                     AS sid, 
+                          webform_submissions.uid 
+                                                                     AS user_id, 
+                          (SELECT NAME 
+                           FROM   {users} 
+                           WHERE  users.uid = webform_submissions .uid) 
+                                                                     AS USER, 
+                          field_data_field_country.field_country_tid 
+                                                                     AS country_id, 
+                          (SELECT NAME 
+                           FROM   {taxonomy_term_data} 
+                           WHERE  taxonomy_term_data.tid = 
+                                  field_data_field_country.field_country_tid) AS country 
+                   FROM   {webform_submissions} 
+                          INNER JOIN {field_data_field_country} 
+                                  ON field_data_field_country.entity_id = 
+                                     webform_submissions.uid) {tbl_user_country} 
+               ON webform_submitted_data.sid = tbl_user_country.sid 
+WHERE  webform_submitted_data.nid = :adhocqueryid 
+       AND webform_submitted_data.cid <> 1 
+       AND webform_submitted_data.cid <> 2
+ORDER  BY CASE country
+            WHEN 'Norway' THEN 1
+            ELSE 0 
+          END, 
+          country, 
+          webform_submitted_data.cid ";
+  $result = db_query($sql, array(':adhocqueryid' => $adhocqueryid));
+  return $result;
+}
+
+/**
+ * Checks to see if phpdocx location is empty or not.
+ *
+ * @param int $docx_location
+ *   The PHPDocx location.
+ */
+function _emnies_ad_hoc_query_exporter_is_phpdocx_location_set($docx_location) {
+  if (!empty($docx_location)) {
+    return TRUE;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+
+/**
+ * Gets the current node object and returns the type.
+ */
+function _emnies_ad_hoc_query_exporter_register_node() {
+  if (_emnies_ad_hoc_query_exporter_is_valid_int(arg(1))) {
+
+    try {
+      $nid = arg(1);
+      $node = node_load($nid);
+      if (!empty($node)) {
+        $type = $node->type;
+        return $type;
+      }
+      else {
+        throw new Exception();
+      }
+    }
+    catch (Exception $e) {
+      watchdog('emnies_ad_hoc_query_exporter', "An error occured while retriving the node type. The node type is empty for NID:$nid", array(), WATCHDOG_ERROR, $link = NULL);
+      drupal_set_message($message = t("An error occured while trying to download. The type could not be retrieved. Please contact the administration team."), $type = 'error');
+      drupal_goto("node/$nid/webform-results");
+    }
+  }
+}
+
+/**
+ * Gets the type of the template.
+ */
+function _emnies_ad_hoc_query_exporter_get_template_type($node_type) {
+  // Get the template types as a reflection class.
+  $template_types = new ReflectionClass('TemplateTypes');
+  // Grab the constants in the class (enums).
+  $constants = $template_types->getConstants();
+  // Get all the names of the constants instead of the values assigned to them.
+  $template_type_keys = array_keys($constants);
+
+  // For each enum assign the names to variables.
+  for ($i = 0; $i < count($template_type_keys); $i++) {
+    $unspecified = $template_type_keys[0];
+    $ahq = $template_type_keys[1];
+    $reg_practitioner = $template_type_keys[2];
+  }
+
+  // Switch to determine what the template type is.
+  global $_template_emnies_ad_hoc_query_exporter_;
+  switch ($node_type) {
+    case 'webform':
+      return $ahq;
+
+    case 'reg_practitioner':
+      return $reg_practitioner;
+
+    default:
+      return $unspecified;
+  }
+}
+
+/**
+ * Checks if the parameter is a valid integer.
+ *
+ * @param int $value
+ *   The node ID number.
+ */
+function _emnies_ad_hoc_query_exporter_is_valid_int($value) {
+  if (is_numeric($value)) {
+    if (strpos($value, ".") !== FALSE) {
+      return FALSE;
+    }
+    else {
+      return TRUE;
+    }
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Creates the meta data object.
+ *
+ * @param int $meta_data
+ *   The data from the the database layer.
+ */
+function _emnies_ad_hoc_query_exporter_get_meta_object($meta_data) {
+
+  $i = 0;
+  $obj_meta = '';
+  foreach ($meta_data as $row) {
+    $i = $i + 1;
+    try {
+      if ($i > 1) {
+        throw new Exception($row);
+      }
+
+      else {
+        $str_start_date = _emnies_ad_hoc_query_exporter_get_nice_date_format($row->start_date);
+        $str_end_date = _emnies_ad_hoc_query_exporter_get_nice_date_format($row->end_date);
+        $obj_meta = new AdHocQuerMeta(
+          $row->nid,
+          $row->title,
+          $row->author,
+          $str_start_date,
+          $str_end_date,
+          $row->author_country,
+          $row->category,
+          $row->background,
+          $row->summary,
+          ''
+        );
+      }
+    }
+    catch (Exception $e) {
+      watchdog('emnies_ad_hoc_query_exporter', "More than one row returned for NID:$row->nid", array(), WATCHDOG_ERROR, $link = NULL);
+      drupal_set_message($message = t("An error occured while trying to download. Please contact the administration team."), $type = 'error');
+      drupal_goto("node/$row->nid/webform-results");
+    }
+  }
+  return $obj_meta;
+}
+
+/**
+ * Creates the question data object.
+ *
+ * @param int $questions_data
+ *   The data from the the database layer.
+ */
+function _emnies_ad_hoc_query_exporter_get_question_objects($questions_data) {
+  $arr_questions = array();
+  foreach ($questions_data as $row) {
+    $row_question = str_replace('<p>', '', $row->question);
+    $row_question = str_replace('</p>', '<br><br>', $row_question);
+    $obj_question = new AdHocQueryQuestion(
+      $row->component_id,
+      $row->order_id,
+      $row_question
+    );
+    $arr_questions[] = $obj_question;
+  }
+  return $arr_questions;
+}
+
+/**
+ * Creates the responses data object.
+ *
+ * @param int $responses_data
+ *   The data from the the database layer.
+ */
+function _emnies_ad_hoc_query_exporter_get_response_objects($responses_data) {
+  $arr_responses = array();
+  foreach ($responses_data as $row) {
+    $obj_response = new AdHocQueryResponse(
+      $row->country,
+      $row->wider_dissemination,
+      $row->response
+    );
+    $arr_responses[] = $obj_response;
+  }
+  return $arr_responses;
+}
+
+// ////////////// Utility Functions ////////////////
+/**
+ * Creates a human readable data format that is easy to read.
+ *
+ * @param int $date
+ *   The webform creation date taken from the database.
+ */
+function _emnies_ad_hoc_query_exporter_get_nice_date_format($date) {
+  $get_date  = date_create($date);
+  $nice_date  = date_format($get_date, ' jS F Y');
+  return $nice_date;
+}
+
+/**
+ * Formats the responses to convert line breaks to paragraphs.
+ *
+ * @param string $response
+ *   The response string to be converted.
+ */
+function _emnies_ad_hoc_query_exporter_nl2br($response) {
+  $string = preg_replace('/\n/', '<br/>', $response);
+  return $string;
+}
+/**
+ * Formats the responses to convert indents to  br tag.
+ *
+ * @param string $response
+ *   The response string to be converted.
+ */
+function _emnies_ad_hoc_query_exporter_nbsp2br($response) {
+  $string = preg_replace('/&nbsp;&nbsp;/', ' <br/> ', $response);
+  $string = preg_replace('/&nbsp;/', '<br/>', $string);
+  $string = preg_replace('/<br\/>$/', ' ', $string);
+
+  return $string;
+}
+
+/**
+ * Implements trim_numbers_from_title().
+ *
+ * Removes the numbering system from the title before adding title to document.
+ *
+ * @param string $title
+ *   The title to trim from.
+ *
+ * @return string
+ *    The formatted title.
+ */
+function _emnies_ad_hoc_query_exporter_trim_numbers_from_title($title) {
+  $title = trim($title);
+  $str_numbers = trim(strstr($title, '-', TRUE));
+  if (is_numeric($str_numbers)) {
+    $title = str_replace($str_numbers, '', $title);
+    $title = preg_replace('/-/', '', $title, 1);
+    $title = trim($title);
+    return $title;
+  }
+  else {
+    return $title;
+  }
+}
+
+
+/**
+ * Implements summary_title().
+ *
+ * Adds a formatted title to the summary text retrieved from the database.
+ *
+ * @param string $summary
+ *    The summary to format.
+ *
+ * @return string
+ *    The formatted summary.
+ */
+function _emnies_ad_hoc_query_exporter_formatted_summary_section($summary) {
+  if (is_null($summary)) {
+    if ($summary == '') {
+      // Must return space to allow PHPDocx to render the file.
+      // Blank string or NULL does not work.
+      // Return non-breaking space.
+      return "<span></span>";
+    }
+    else {
+      return "&nbsp;";
+    }
+  }
+  else {
+    $summary_title = '<p style="font-family: Times New Roman; text-decoration: underline;"><b>Summary of the Ad-Hoc-Query</b></p>';
+    $summary_block = $summary_title . '<span style="font-family: Times New Roman;">' . $summary . '</span>';
+    return $summary_block;
+  }
+}
+
+/**
+ * Formats the array of responded countries to be a comma separated string.
+ *
+ * @param int $responses_data
+ *   The data from the the database layer.
+ *
+ * @return string
+ *    The string to format as a comma seperated value.
+ */
+function _emnies_ad_hoc_query_exporter_get_responded_countries_as_comma_separated_string($responses_data) {
+  $comma_separated_countries = '';
+  $arr_unique_countries = array();
+  foreach ($responses_data as $row) {
+    $str_country = $row->country;
+    $arr_countries[] = $str_country;
+    $arr_unique_countries = array_unique($arr_countries);
+    $comma_separated_countries = implode(", ", $arr_unique_countries);
+  }
+  $count = ' (' . count($arr_unique_countries) . ' ' . t('in total)');
+  $comma_separated_countries = $comma_separated_countries . $count;
+  return $comma_separated_countries;
+}
+
+/**
+ * Formats the background data to show new lines and paragraphs.
+ *
+ * @param string $meta_background
+ *   The background data from the mat object.
+ *
+ * @return mixed|string
+ *   Returns the formatted background data.
+ */
+function _emnies_ad_hoc_query_exporter_get_html_formatted_ad_hoc_query_background($meta_background) {
+  $background = _emnies_ad_hoc_query_exporter_nl2br($meta_background);
+  $background = "<p style='font-family: Times New Roman'>$background</p>";
+  return $background;
+}
+
+/**
+ * Formats the question dataobject.
+ */
+function _emnies_ad_hoc_query_exporter_get_html_formatted_ad_hoc_query_questions($obj_question) {
+  $items = array(
+    'type' => 'ol',
+    'title' => '<b><p style="font-family: Times New Roman; text-decoration: underline;">Questions</p></b>',
+    'attributes' => array(
+      'border' => '1px #000000',
+      'style' => 'font-family:Times New Roman',
+    ),
+  );
+  foreach ($obj_question as $question) {
+    $items['items'][] = _emnies_ad_hoc_query_exporter_nbsp2br($question->question);
+  }
+  $output = theme('item_list', $items) . '<br/>';
+  return $output;
+}
+
+/**
+ * Formats the responses object.
+ */
+function _emnies_ad_hoc_query_exporter_get_html_formatted_ad_hoc_query_responses($obj_response) {
+  $str_current_country = '';
+  $html = array();
+  foreach ($obj_response as $response) {
+    if ($str_current_country != $response->country) {
+      $str_current_country = $response->country;
+      $html[] = array('data' => _emnies_ad_hoc_query_exporter_get_country_row($str_current_country, $obj_response));
+    }
+  }
+  $header = array(
+    array('data' => ''),
+    array('data' => t('Country'), 'style' => 'font-family: Times New Roman'),
+    array('data' => t('Wider Dissemination'), 'style' => 'font-family: Times New Roman'),
+    array('data' => t('Response'), 'style' => 'font-family: Times New Roman'),
+  );
+  $table = array(
+    'header' => $header,
+    'rows' => $html,
+    'attributes' => array(
+      'border' => '1px #000000',
+      'style' => 'font-family:Times New Roman',
+    ),
+  );
+  $response_title = '<b><p style="font-family: Times New Roman; text-decoration: underline;">Responses</p></b>';
+  $output = $response_title . theme('table', $table);
+  return $output;
+
+}
+
+/**
+ * Formats the country object.
+ *
+ * @param string $str_current_country
+ *   The string name of the country whos response is being processed.
+ */
+function _emnies_ad_hoc_query_exporter_get_country_row($str_current_country, $obj_response) {
+  global $base_url;
+  global $_ispublic_emnies_ad_hoc_query_exporter_;
+  $flag_name = str_replace(' ', '-', $str_current_country);
+  $rows = array();
+  $answer = '';
+  $i = 0;
+  foreach ($obj_response as $response) {
+    if ($str_current_country == $response->country) {
+      if ($i == 0) {
+        $rows[] = array(
+          'data'   => '<img src="' . $base_url . '/' . drupal_get_path("module", "emnies_ad_hoc_query_exporter") . '/flags/' . $flag_name . '.png"/>',
+          'valign' => 'top',
+        );
+        $rows[] = array(
+          'data'   => $str_current_country,
+          'valign' => 'top',
+          'style'  => 'font-family: Times New Roman',
+        );
+        $rows[] = array(
+          'data'   => $response->wider_dissemination,
+          'valign' => 'top',
+          'style'  => 'font-family: Times New Roman',
+        );
+      }
+      $i = $i + 1;
+      if ($_ispublic_emnies_ad_hoc_query_exporter_ == TRUE) {
+        if ($response->wider_dissemination == 'Yes') {
+          $answer .= '<p style="margin-top:0px;"> <b>' . $i . '. </b>';
+          $answer .= $response->response . '</p>';
+        }
+      }
+      if ($_ispublic_emnies_ad_hoc_query_exporter_ == FALSE) {
+        $answer .= '<p style="margin-top:0px;"> <b>' . $i . '. </b>';
+        $answer .= $response->response . '</p>';
+      }
+    }
+  }
+
+  $rows[] = array(
+    'data' => $answer,
+    'valign' => 'top',
+    'style' => 'font-family: Times New Roman',
+  );
+  return $rows;
+}
+
+
+/**
+ * Populates the Word template with the data from the Webform.
+ */
+function _emnies_ad_hoc_query_exporter_create__word_document($obj_ad_hoc_query_meta, $obj_ad_hoc_query_questions, $obj_ad_hoc_query_responses) {
+  require_once variable_get(EMNIES_AD_HOC_QUERY_EXPORTER_PHPDOCX_LOCATION);
+  global $_wider_notice_emnies_ad_hoc_query_exporter_;
+  global $_template_emnies_ad_hoc_query_exporter_;
+  try {
+    if ($_template_emnies_ad_hoc_query_exporter_->type == 'AHQ') {
+      $template_file = variable_get(EMNIES_AD_HOC_QUERY_EXPORTER_EMNIES_AD_HOC_TEMPLATE);
+      $template_dir = "/ahq_templates/";
+      if (!file_exists(EMNIES_AD_HOC_QUERY_EXPORTER_TEMPLATE_PATH . $template_dir . $template_file)) {
+        throw new Exception();
+      }
+    }
+    elseif ($_template_emnies_ad_hoc_query_exporter_->type == 'REG_PRACTITIONER') {
+      $template_file = variable_get(EMNIES_AD_HOC_QUERY_EXPORTER_EMNIES_REG_PRACTITIONER_TEMPLATE);
+      $template_dir = "/reg_templates/";
+      if (!file_exists(EMNIES_AD_HOC_QUERY_EXPORTER_TEMPLATE_PATH . $template_dir . $template_file)) {
+        throw new Exception();
+      }
+    }
+  }
+  catch (Exception $e) {
+    watchdog('emnies_ad_hoc_query_exporter', "Template path incorrect for $_template_emnies_ad_hoc_query_exporter_->type.", array(), WATCHDOG_ERROR, $link = NULL);
+    drupal_set_message($message = "Document cannot be created. Please ensure the module is configured correctly, or contact the administration team quoting that the document failed to download for NID:$obj_ad_hoc_query_meta->nid", $type = 'error');
+    drupal_goto("node/$obj_ad_hoc_query_meta->nid/webform-results");
+  }
+
+  $docx = new Phpdocx\Create\CreateDocxFromTemplate(EMNIES_AD_HOC_QUERY_EXPORTER_TEMPLATE_PATH . $template_dir . $template_file);
+  $document_title = transliteration_clean_filename($obj_ad_hoc_query_meta->title);
+  $docx->replaceVariableByText(array('WIDER-NOTICE' => $_wider_notice_emnies_ad_hoc_query_exporter_));
+  $docx->replaceVariableByText(array('TITLE' => _emnies_ad_hoc_query_exporter_trim_numbers_from_title($obj_ad_hoc_query_meta->title)));
+  $docx->replaceVariableByText(array('AUTHOR' => $obj_ad_hoc_query_meta->author));
+  $docx->replaceVariableByText(array('COUNTRY' => $obj_ad_hoc_query_meta->author_country));
+  $docx->replaceVariableByText(array('S_DATE' => $obj_ad_hoc_query_meta->start));
+  $docx->replaceVariableByText(array('E_DATE' => $obj_ad_hoc_query_meta->end));
+  $docx->replaceVariableByText(array('CATEGORY' => $obj_ad_hoc_query_meta->category));
+  $docx->replaceVariableByText(array('COUNTRIES' => $obj_ad_hoc_query_meta->respondedCountries));
+  $docx->replaceVariableByHTML('SUMMARY', 'block', _emnies_ad_hoc_query_exporter_formatted_summary_section($obj_ad_hoc_query_meta->summary), array('wordStyles' => array("AHQ-style" => "Ad-Hoc")));
+  $docx->replaceVariableByHTML('BACKGROUND', 'block', _emnies_ad_hoc_query_exporter_get_html_formatted_ad_hoc_query_background($obj_ad_hoc_query_meta->background), array('wordStyles' => array(".AHQ-style" => "Ad-Hoc")));
+  $docx->replaceVariableByHTML('QUESTIONS', 'block', _emnies_ad_hoc_query_exporter_get_html_formatted_ad_hoc_query_questions($obj_ad_hoc_query_questions), array('wordStyles' => array(".AHQ-style" => "Ad-Hoc")));
+  $docx->replaceVariableByHTML('RESPONSES', 'block', _emnies_ad_hoc_query_exporter_get_html_formatted_ad_hoc_query_responses($obj_ad_hoc_query_responses), array('wordStyles' => array(".AHQ-style" => "Ad-Hoc"), 'downloadImages' => TRUE));
+  watchdog('emnies_ad_hoc_query_exporter', "Download for $document_title(NID:$obj_ad_hoc_query_meta->nid) completed.", array(), WATCHDOG_INFO, $link = NULL);
+  return $docx->createDocxandDownload(EMNIES_AD_HOC_QUERY_EXPORTER_TEMPORARY_FOLDER_PATH . $document_title);
+}
