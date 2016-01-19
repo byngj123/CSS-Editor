@@ -1,0 +1,338 @@
+<?php
+/**
+ * @file
+ * Drupal needs this blank file.
+ */
+
+/**
+ * Get all people from the db.
+ */
+function get_people() {
+  $query = db_select('test_table', 't')
+        ->fields('t', array('id', 'name', 'age', 'image'));
+  $people = $query->execute();
+  return $people;
+}
+
+
+/**
+ * Get a person by filter.
+ */
+function get_person($colname, $val) {
+  $query = db_select('test_table', 't')
+            ->fields('t', array('id', 'name', 'age', 'image'))
+            ->condition($colname, $val, '=');
+
+  $people = $query->execute();
+  return $people;
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function data_retrieval_block_info() {
+  // This example comes from node.module.
+  $blocks['people'] = array(
+    'info' => t('People'),
+    // 'cache' => DRUPAL_NO_CACHE,
+  );
+
+
+}
+
+
+function data_retrieval_show_table($delta = '') {
+    //$block = array();
+  $people = get_people();
+
+    $html = array();
+    foreach ($people as $person) {
+        $id = $person->id;
+        $name = $person->name;
+        $age = $person->age;
+
+        if (!empty($person->image)) {
+            $image = $person->image;
+            $pic = drupal_get_path('module', 'data_retrieval') . '/images/' . $image;
+        } else {
+            $image = "placeholder.png";
+            $pic = drupal_get_path('module', 'data_retrieval') . '/images/' . $image;
+        }
+
+        $html[] = array(
+            array('data' => '<a href="?q=form_edit&id=' . $id . '">' . $name . '</a>'),
+            array('data' => $age),
+            array('data' => '<img src="' . $pic . '" height="100px" width="100px" alt="" />'),
+
+        );
+    }
+
+
+    $header = array(
+        array('data' => t('Name'), 'style' => 'font-family: Times New Roman'),
+        array('data' => t('Age'), 'style' => 'font-family: Times New Roman'),
+        array('data' => t('Image'), 'style' => 'width: 50px'),
+    );
+
+
+    $table = array(
+        'header' => $header,
+        'rows' => $html,
+        'attributes' => array(
+            'border' => '1px #000000',
+            'style' => 'font-family:Times New Roman',
+        ),
+    );
+
+    // $block['subject'] = t('People');
+    $block = theme('table', $table);
+
+    return $block;
+}
+
+
+function data_retrieval_main_form()
+{
+    $form ['field2'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Name'),
+        '#default_value' => 'Name',
+        '#maxlength' => 127,
+    );
+
+    $form ['field3'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Age'),
+        '#default_value' => 'Age',
+        '#maxlength' => 127,
+    );
+
+
+    $form ['submit_field'] = array(
+        '#type' => 'submit',
+        '#default_value' => 'Submit',
+    );
+
+    $form['#submit'] = array('data_retrieval_main_form_submit');
+
+    return $form;
+}
+
+
+function data_retrieval_main_form_submit()
+{
+    form_set_error('data_retrieval_form', 'Fucking works');
+}
+
+/**
+ * Implements hook_form().
+ */
+function data_retrieval_form($node, &$form_state)
+{
+
+    if (!empty($_GET['id'])) {
+        $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
+
+
+        $person = get_person('id', $id);
+
+        foreach ($person as $p) {
+            $name = $p->name;
+            $age = $p->age;
+        }
+
+    } else {
+        $name = "";
+        $age = "";
+    }
+
+    $form ['field2'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Name'),
+        '#default_value' => $name,
+        '#maxlength' => 127,
+    );
+
+    $form ['field3'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Age'),
+        '#default_value' => $age,
+        '#maxlength' => 127,
+    );
+
+
+
+    $form['fileupload'] = array(
+        '#title' => t('Choose Image'),
+        '#type' => 'file',
+    );
+
+    $form ['submit_field'] = array(
+        '#type' => 'submit',
+        '#default_value' => 'Submit',
+    );
+
+    $form['#submit'] = array('data_retrieval_form_submit');
+    return $form;
+
+}
+
+
+
+
+function data_retrieval_form_submit($form_id, &$form_state)
+{
+       if (!empty($_GET['id'])) {
+            $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
+        }
+
+
+        $name = $form_state ['values']['field2'];
+        $age = $form_state ['values']['field3'];
+        $error = false;
+
+        // validate form fields
+        if (empty($name)) {
+            form_set_error('data_retrieval_form', 'Name required');
+            $error = true;
+        } else if (!ctype_alpha(str_replace(' ', '', $name))) {
+            form_set_error('data_retrieval_form', 'Name can only contain letters and single spaces');
+            $error = true;
+        }
+
+        if (empty($age)) {
+            form_set_error('data_retrieval_form', 'Age required');
+            $error = true;
+        } else if (!ctype_digit($age)) {
+            form_set_error('data_retrieval_form', 'Age needs to be numeric');
+            $error = true;
+        }
+
+        // get the uploaded file and check if it is one of the below extensions
+        $new_file = file_save_upload('fileupload', array(
+            'file_validate_extensions' => array('bmp jpg jpeg png gif tiff'),
+            'custom_validate_size' => array(1024 * 1024 * 30), // You should define validation function for file size, in case file is too big.
+        ));
+
+        try {
+
+            // if user has uploaded a new file then save it to a public directory
+            if (!empty($new_file)) {
+                // move file
+                $result = file_move($new_file, 'imagesdir://', FILE_EXISTS_REPLACE);
+
+                if ($result) {
+                    // Succeed.
+                } else {
+                    form_set_error('data_retrieval_form', 'Failed to upload file');
+                    $error = true;
+                }
+
+                //
+            } else {
+                $image = "";
+                if (!empty($id) ){
+                    $person = get_person('id',$id);
+
+                    foreach ($person as $p) {
+                        $image = $p->image;
+                    }
+
+                }
+
+                $new_file = new stdClass();
+                $new_file->filename = "";
+                if (!empty($image)) {
+                    $new_file->filename = $image;
+                }
+            }
+
+        } catch (Exception $e) {
+            form_set_error('data_retrieval_form', 'Error: ' . $e->getMessage());
+            $error = true;
+        }
+
+
+        // if there are no errors then insert the data into the db
+        if (!$error) {
+
+
+            $fields_array = array(
+                'name' => $name,
+                'age' => $age,
+                'image' => $new_file->filename);
+
+
+
+            // if it is an existing entry we need to update
+            if (!empty($id)) {
+                $num_updated = db_update('test_table')
+                    ->fields($fields_array)
+                    ->condition('id', $id, '=')
+                    ->execute();
+
+                if ($num_updated) {
+                    drupal_set_message(t('Entry Updated'), 'status');
+                }
+
+
+            } else {
+
+
+                // if it is a new entry we need to insert
+                $query = db_insert('test_table')
+
+                ->fields($fields_array)
+                    ->execute();
+                if ($query) {
+                    drupal_set_message(t('Entry Added'), 'status');
+                } else {
+                    form_set_error('data_retrieval_form', 'Error: ');
+                }
+
+            }
+
+
+        } else {
+            form_set_error('data_retrieval_form', 'There was an error: ');
+
+        }
+
+
+}
+
+
+/**
+ * Implements hook_menu().
+ */
+function data_retrieval_menu()
+{
+    $items = array();
+
+    $items ['form_example'] = array(
+        'title' => 'Data',
+        'page callback' => 'data_retrieval_show_table',
+        'page arguments' => array('data_retrieval_show_table'),
+        'access arguments' => array('access content'),
+        'type' => MENU_NORMAL_ITEM,
+    );
+
+    $items ['form_edit'] = array(
+        'title' => 'Add / Update Data',
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('data_retrieval_form'),
+        //'access callback' => 'user_permission',
+        'access arguments' => array('access content'),
+        'type' => MENU_NORMAL_ITEM,
+    );
+
+    $items ['form_test'] = array(
+        'title' => 'Test Form',
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('data_retrieval_main_form'),
+        //'access callback' => 'user_permission',
+        'access arguments' => array('access content'),
+        'type' => MENU_NORMAL_ITEM,
+    );
+    return $items;
+}

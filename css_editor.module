@@ -1,0 +1,20 @@
+<?php
+/**
+ * @file
+ * Drupal needs this blank file.
+ */
+
+/**
+ * Adds a new button to the Configuration Menu.
+ */
+function css_editor_menu() {
+  $items['admin/config/development/css_editor'] = array(
+    'title' => 'CSS Editor',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_emnies_ad_hoc_query_exporter_ahq_template_update_form'),
+    'access arguments' => array('access emn exporter configuration page'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
